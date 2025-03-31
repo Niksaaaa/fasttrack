@@ -1,13 +1,12 @@
-const CACHE_NAME = 'fasting-tracker-plus-cache-v1.2'; // Increment version to force update
+const CACHE_NAME = 'fasting-tracker-plus-cache-v1.3'; // Increment version
 const urlsToCache = [
-    '/', // Cache the root URL
+    '/',
     '/index.html',
     '/style.css',
     '/script.js',
-    'https://cdn.jsdelivr.net/npm/chart.js', // Cache Chart.js CDN
-    // Add '/manifest.json' if you want to cache it
-    // Add '/icons/icon-192x192.png', '/icons/icon-512x512.png' etc.
-    '/icons/icon-192x192.png', // Make sure paths are correct
+    '/manifest.json', // <<< Make sure this is here
+    'https://cdn.jsdelivr.net/npm/chart.js',
+    '/icons/icon-192x192.png',
     '/icons/icon-512x512.png'
 ];
 
@@ -18,7 +17,14 @@ self.addEventListener('install', event => {
         caches.open(CACHE_NAME)
             .then(cache => {
                 console.log('Service Worker: Caching app shell');
-                return cache.addAll(urlsToCache);
+                // Use { cache: 'reload' } for essential files if needed during updates
+                // but be mindful of offline-first goals
+                const cachePromises = urlsToCache.map(urlToCache => {
+                    return cache.add(urlToCache).catch(err => {
+                        console.warn(`Failed to cache ${urlToCache}: ${err}`);
+                    });
+                });
+                return Promise.all(cachePromises);
             })
             .then(() => {
                 console.log('Service Worker: Installation complete');
@@ -33,7 +39,7 @@ self.addEventListener('install', event => {
 // Activate event: Clean up old caches
 self.addEventListener('activate', event => {
      console.log('Service Worker: Activating...');
-    const cacheWhitelist = [CACHE_NAME]; // Only keep the current cache
+    const cacheWhitelist = [CACHE_NAME];
     event.waitUntil(
         caches.keys().then(cacheNames => {
             return Promise.all(
@@ -46,47 +52,60 @@ self.addEventListener('activate', event => {
             );
         }).then(() => {
             console.log('Service Worker: Activation complete');
-             return self.clients.claim(); // Take control of existing clients immediately
+             return self.clients.claim(); // Take control immediately
         })
     );
 });
 
-// Fetch event: Serve cached assets or fetch from network
+// Fetch event: Cache-first strategy
 self.addEventListener('fetch', event => {
-    // console.log('Service Worker: Fetching ', event.request.url);
-    // Use a cache-first strategy
+    // Non-GET requests or specific paths shouldn't be cached typically
+    if (event.request.method !== 'GET' /*|| event.request.url.includes('/api/')*/) {
+        // console.log('Service Worker: Bypassing cache for non-GET request', event.request.url);
+        event.respondWith(fetch(event.request));
+        return;
+    }
+
+    // Cache-first for GET requests
     event.respondWith(
         caches.match(event.request)
-            .then(response => {
+            .then(cachedResponse => {
                 // Cache hit - return response
-                if (response) {
+                if (cachedResponse) {
                     // console.log('Service Worker: Serving from cache', event.request.url);
-                    return response;
+                    return cachedResponse;
                 }
 
                 // Not in cache - fetch from network
-                 // console.log('Service Worker: Fetching from network', event.request.url);
+                // console.log('Service Worker: Fetching from network', event.request.url);
                 return fetch(event.request).then(
-                    // Optional: Cache newly fetched resources if needed dynamically
-                    // For this simple app, caching only the predefined shell is usually enough.
-                     networkResponse => {
-                         // If you want to cache everything that's fetched:
-                         /*
-                         if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
-                            return networkResponse; // Don't cache errors or opaque responses
-                         }
-                         let responseToCache = networkResponse.clone();
-                         caches.open(CACHE_NAME).then(cache => {
-                             cache.put(event.request, responseToCache);
-                         });
-                         */
-                         return networkResponse;
-                     }
-                );
-            }).catch(error => {
-                console.error('Service Worker: Fetch error:', error);
-                 // Optional: Return a fallback offline page if fetch fails and not in cache
-                 // return caches.match('/offline.html');
+                    networkResponse => {
+                        // Check if we received a valid response
+                        if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== 'basic') {
+                            return networkResponse;
+                        }
+
+                        // IMPORTANT: Clone the response. A response is a stream
+                        // and because we want the browser to consume the response
+                        // as well as the cache consuming the response, we need
+                        // to clone it so we have two streams.
+                        let responseToCache = networkResponse.clone();
+
+                        caches.open(CACHE_NAME)
+                            .then(cache => {
+                                // console.log('Service Worker: Caching new resource', event.request.url);
+                                cache.put(event.request, responseToCache);
+                            });
+
+                        return networkResponse;
+                    }
+                ).catch(error => {
+                    console.error('Service Worker: Fetch error:', error);
+                    // Optional: Provide a fallback page/resource if network fails
+                    // Example: return caches.match('/offline.html');
+                    // For an API call, you might return a default JSON structure or just let the error propagate
+                    // For this app, letting it fail might be okay, the UI should handle lack of data.
+                });
             })
     );
 });

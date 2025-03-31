@@ -10,7 +10,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const stopBtn = document.getElementById('stop-btn');
     const historyList = document.getElementById('history-list');
     const noHistoryMsg = document.getElementById('no-history');
-    // New elements
     const themeToggle = document.getElementById('themeToggle');
     const goalHoursInput = document.getElementById('goal-hours');
     const setGoalBtn = document.getElementById('set-goal-btn');
@@ -22,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const fastNotesInput = document.getElementById('fast-notes');
     const chartSection = document.getElementById('chart-section');
     const historyChartCanvas = document.getElementById('historyChart');
+    // REMOVED: const installAppButton = document.getElementById('install-app-button');
 
     // --- State variables ---
     let currentFastStartTime = null; // Timestamp (ms) when current fast started, or null
@@ -30,6 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentGoalDuration = null;  // Target duration in milliseconds, or null
     let currentTheme = 'light';      // 'light' or 'dark'
     let historyChart = null;         // Chart.js instance
+    // REMOVED: let deferredInstallPrompt = null;
 
     // --- Initialization ---
     loadState(); // Load theme first
@@ -46,8 +47,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Enter') setGoal(); // Allow Enter to set goal
     });
 
-
-    // --- PWA ---
+    // --- PWA Service Worker ---
     function registerServiceWorker() {
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('/sw.js') // Make sure sw.js is at the root
@@ -59,6 +59,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
         }
     }
+
+    // --- PWA Install Prompt Handling (Browser Default) ---
+    // We are *not* preventing the default browser prompt here.
+    // The browser will show its own UI when criteria are met.
+    window.addEventListener('beforeinstallprompt', (event) => {
+      // Optionally: Log that the browser is ready to prompt
+      console.log('Browser install prompt available (beforeinstallprompt fired).');
+      // We are NOT calling event.preventDefault()
+      // We are NOT storing the event (deferredInstallPrompt = event;)
+      // We are NOT showing our custom button (#install-app-button)
+    });
+
+    // Optional: Track installation success/dismissal
+    window.addEventListener('appinstalled', () => {
+        console.log('PWA was installed');
+        // Optionally hide any custom promotion UI if you had one
+    });
+
 
     // --- Theme Handling ---
     function handleThemeToggle() {
@@ -93,7 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
             saveState();
             updateUI(); // Update display
         } else {
-            // Basic validation feedback (could be more user-friendly)
+            // Basic validation feedback
             alert('Please enter a valid positive number for goal hours.');
             goalHoursInput.value = '';
         }
@@ -217,7 +235,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function updateProgressBar() {
         if (!currentFastStartTime || !currentGoalDuration || currentGoalDuration <= 0) {
-             // Don't show progress if no start time or no valid goal
              progressContainer.style.display = 'none';
              return;
         }
@@ -237,14 +254,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (fastHistory.length === 0) {
             noHistoryMsg.style.display = 'block';
+            chartSection.style.display = 'none'; // Also hide chart section if no history
+             if (historyChart) {
+                historyChart.destroy();
+                historyChart = null;
+             }
             return;
         }
 
         noHistoryMsg.style.display = 'none';
         const reversedHistory = [...fastHistory].reverse(); // Newest first
 
-        reversedHistory.forEach(fast => {
+        reversedHistory.forEach((fast, index) => { // Added index for potential future use
             const li = document.createElement('li');
+            li.classList.add('history-item'); // Add class for styling
 
             const durationFormatted = formatDuration(fast.duration);
             const durationString = `${durationFormatted.hours}h ${durationFormatted.minutes}m ${durationFormatted.seconds}s`;
@@ -253,50 +276,57 @@ document.addEventListener('DOMContentLoaded', () => {
             const endTimeFormatted = formatDateTime(new Date(fast.endTime));
 
             let goalMetIndicator = '';
-            if (fast.goalDuration && fast.duration >= fast.goalDuration) {
-                goalMetIndicator = ' <span style="color: var(--primary-color); font-size: 1.1em;" title="Goal Met">✓</span>'; // Simple checkmark
-            } else if (fast.goalDuration) {
-                goalMetIndicator = ' <span style="color: var(--secondary-color); font-size: 0.9em;" title="Goal Not Met">✕</span>';
+            let goalMetClass = '';
+            if (fast.goalDuration) {
+                if (fast.duration >= fast.goalDuration) {
+                    goalMetIndicator = '<span class="goal-icon goal-met" title="Goal Met">✔</span>'; // Use symbols
+                    goalMetClass = 'goal-met';
+                } else {
+                    goalMetIndicator = '<span class="goal-icon goal-not-met" title="Goal Not Met">✖</span>';
+                    goalMetClass = 'goal-not-met';
+                }
             }
 
-            // Sanitize notes to prevent basic HTML injection if displaying directly
-            // A more robust sanitizer would be needed for untrusted input
-            const sanitizedNotes = fast.notes.replace(/</g, "<").replace(/>/g, ">");
-
+            // Basic sanitization (consider a library for robust sanitization if input source is less trusted)
+            const sanitizedNotes = (fast.notes || "").replace(/</g, "<").replace(/>/g, ">");
 
             li.innerHTML = `
-                <div class="history-item-header">
-                    <span class="history-item-duration">${durationString}${goalMetIndicator}</span>
-                    <span class="history-item-times">
-                        ${startTimeFormatted} – ${endTimeFormatted}
-                    </span>
-                </div>
-                ${fast.notes ? `<div class="history-item-notes">${sanitizedNotes}</div>` : ''}
+                <div class="history-item-main">
+                    <div class="history-item-duration ${goalMetClass}">
+                         ${durationString} ${goalMetIndicator}
+                     </div>
+                     <div class="history-item-times">
+                         ${startTimeFormatted} – ${endTimeFormatted}
+                     </div>
+                 </div>
+                ${sanitizedNotes ? `<div class="history-item-notes">${sanitizedNotes}</div>` : ''}
             `;
             historyList.appendChild(li);
         });
+         chartSection.style.display = 'block'; // Ensure chart section is visible if history exists
     }
 
     // --- Charting ---
      function renderOrUpdateChart() {
-        if (fastHistory.length === 0) {
-            chartSection.style.display = 'none';
-             if (historyChart) {
-                historyChart.destroy(); // Clean up existing chart instance
-                historyChart = null;
-            }
-            return;
-        }
-
-        chartSection.style.display = 'block';
+        // Check moved to renderHistory for efficiency
+        if (fastHistory.length === 0) return;
 
         // Prepare data for Chart.js
-        // Show last N fasts, e.g., last 15
-        const historySlice = fastHistory.slice(-15);
+        const historySlice = fastHistory.slice(-15); // Show last 15 fasts
 
         const labels = historySlice.map(fast => formatDateForChart(new Date(fast.startTime)));
-        const durationsHours = historySlice.map(fast => (fast.duration / (1000 * 60 * 60))); // Duration in hours
-        const goalHours = historySlice.map(fast => fast.goalDuration ? (fast.goalDuration / (1000*60*60)) : null); // Goal in hours or null/undefined
+        const durationsHours = historySlice.map(fast => (fast.duration / (1000 * 60 * 60)));
+        const goalHours = historySlice.map(fast => fast.goalDuration ? (fast.goalDuration / (1000*60*60)) : null);
+
+         // Determine colors based on theme
+         const isDark = currentTheme === 'dark';
+         const barBgColor = isDark ? 'rgba(102, 187, 106, 0.6)' : 'rgba(76, 175, 80, 0.7)'; // Primary variations
+         const barBorderColor = isDark ? 'rgba(102, 187, 106, 1)' : 'rgba(76, 175, 80, 1)';
+         const goalLineColor = isDark ? 'rgba(239, 83, 80, 0.8)' : 'rgba(244, 67, 54, 0.9)'; // Secondary variations
+         const gridColor = getComputedStyle(document.body).getPropertyValue('--border-color');
+         const tickColor = getComputedStyle(document.body).getPropertyValue('--text-muted-color');
+         const textColor = getComputedStyle(document.body).getPropertyValue('--text-color');
+
 
          const chartData = {
             labels: labels,
@@ -304,23 +334,24 @@ document.addEventListener('DOMContentLoaded', () => {
                  {
                     label: 'Fast Duration (hours)',
                     data: durationsHours,
-                    backgroundColor: 'rgba(75, 192, 192, 0.6)', // Teal base color
-                    borderColor: 'rgba(75, 192, 192, 1)',
+                    backgroundColor: barBgColor,
+                    borderColor: barBorderColor,
                     borderWidth: 1,
-                    yAxisID: 'yHours', // Assign to the primary Y axis
-                    order: 2 // Render bars behind line
+                    yAxisID: 'yHours',
+                    order: 2
                  },
                   {
                     label: 'Goal (hours)',
                     data: goalHours,
-                    borderColor: 'rgba(255, 99, 132, 0.8)', // Reddish color for goal line
-                    borderWidth: 2,
-                    borderDash: [5, 5], // Dashed line for goal
-                    type: 'line', // Render as a line chart on top
-                    fill: false, // Don't fill under the line
-                    pointRadius: 0, // No points on the goal line
-                    yAxisID: 'yHours', // Use the same axis
-                    order: 1 // Render line on top of bars
+                    borderColor: goalLineColor,
+                    borderWidth: 2.5, // Slightly thicker line
+                    borderDash: [6, 3], // Adjusted dash pattern
+                    type: 'line',
+                    fill: false,
+                    pointRadius: 0,
+                    yAxisID: 'yHours',
+                    order: 1,
+                    tension: 0.1 // Slight curve to line
                   }
              ]
          };
@@ -328,28 +359,33 @@ document.addEventListener('DOMContentLoaded', () => {
          const chartOptions = {
              scales: {
                  x: {
-                     ticks: { color: getComputedStyle(document.body).getPropertyValue('--text-muted-color') }, // Dynamic color
-                     grid: { color: getComputedStyle(document.body).getPropertyValue('--border-color') }      // Dynamic color
+                     ticks: { color: tickColor },
+                     grid: { color: gridColor }
                  },
-                 yHours: { // Define the Y axis for hours
+                 yHours: {
                      beginAtZero: true,
                      position: 'left',
-                     title: { display: true, text: 'Hours', color: getComputedStyle(document.body).getPropertyValue('--text-color') }, // Dynamic color
-                     ticks: { color: getComputedStyle(document.body).getPropertyValue('--text-muted-color') },// Dynamic color
-                     grid: { color: getComputedStyle(document.body).getPropertyValue('--border-color') }     // Dynamic color
+                     title: { display: true, text: 'Hours', color: textColor },
+                     ticks: { color: tickColor },
+                     grid: { color: gridColor }
                  }
              },
              plugins: {
                 legend: {
-                     labels: { color: getComputedStyle(document.body).getPropertyValue('--text-color') } // Dynamic color
+                     labels: { color: textColor }
                 },
                  tooltip: {
+                     backgroundColor: isDark ? 'rgba(40,40,40,0.9)' : 'rgba(255,255,255,0.9)',
+                     titleColor: textColor,
+                     bodyColor: textColor,
+                     borderColor: gridColor,
+                     borderWidth: 1,
+                     padding: 10,
                      callbacks: {
                         label: function(context) {
                             let label = context.dataset.label || '';
                             if (label) { label += ': '; }
                             if (context.parsed.y !== null) {
-                                // Show hours with one decimal place
                                 label += context.parsed.y.toFixed(1) + ' hrs';
                             }
                             return label;
@@ -357,24 +393,22 @@ document.addEventListener('DOMContentLoaded', () => {
                      }
                  }
              },
-             maintainAspectRatio: false, // Allow chart to fill container height
+             maintainAspectRatio: false,
              responsive: true,
          };
 
 
         if (!historyChart) {
-            // Create new chart
             const ctx = historyChartCanvas.getContext('2d');
             historyChart = new Chart(ctx, {
-                type: 'bar', // Base type is bar
+                type: 'bar',
                 data: chartData,
                 options: chartOptions
             });
         } else {
-            // Update existing chart
             historyChart.data = chartData;
-             // Re-apply dynamic colors in case theme changed
-             updateChartAppearance();
+            // Update colors and scales directly for theme changes
+            updateChartAppearance(); // Call helper to apply theme colors
             historyChart.update();
         }
     }
@@ -382,32 +416,31 @@ document.addEventListener('DOMContentLoaded', () => {
     // Helper function to update chart colors based on theme
     function updateChartAppearance() {
          if (!historyChart) return;
-          const textColor = getComputedStyle(document.body).getPropertyValue('--text-color');
-          const mutedColor = getComputedStyle(document.body).getPropertyValue('--text-muted-color');
-          const borderColor = getComputedStyle(document.body).getPropertyValue('--border-color');
-          const primaryColor = getComputedStyle(document.body).getPropertyValue('--primary-color');
-          const accentColor = getComputedStyle(document.body).getPropertyValue('--accent-color'); // Use accent or primary/secondary as base
 
-           // Bar colors (use semi-transparent accent)
-         const barBgColor = currentTheme === 'dark' ? 'rgba(90, 200, 250, 0.6)' : 'rgba(33, 150, 243, 0.6)'; // Example accent colors
-         const barBorderColor = currentTheme === 'dark' ? 'rgba(90, 200, 250, 1)' : 'rgba(33, 150, 243, 1)';
-         // Goal line color (use semi-transparent secondary/reddish)
-         const goalLineColor = currentTheme === 'dark' ? 'rgba(239, 83, 80, 0.8)' : 'rgba(244, 67, 54, 0.8)'; // Example secondary colors
+         const isDark = currentTheme === 'dark';
+         const gridColor = getComputedStyle(document.body).getPropertyValue('--border-color');
+         const tickColor = getComputedStyle(document.body).getPropertyValue('--text-muted-color');
+         const textColor = getComputedStyle(document.body).getPropertyValue('--text-color');
+         const barBgColor = isDark ? 'rgba(102, 187, 106, 0.6)' : 'rgba(76, 175, 80, 0.7)';
+         const barBorderColor = isDark ? 'rgba(102, 187, 106, 1)' : 'rgba(76, 175, 80, 1)';
+         const goalLineColor = isDark ? 'rgba(239, 83, 80, 0.8)' : 'rgba(244, 67, 54, 0.9)';
 
-
-         historyChart.options.scales.x.ticks.color = mutedColor;
-         historyChart.options.scales.x.grid.color = borderColor;
+         historyChart.options.scales.x.ticks.color = tickColor;
+         historyChart.options.scales.x.grid.color = gridColor;
          historyChart.options.scales.yHours.title.color = textColor;
-         historyChart.options.scales.yHours.ticks.color = mutedColor;
-         historyChart.options.scales.yHours.grid.color = borderColor;
+         historyChart.options.scales.yHours.ticks.color = tickColor;
+         historyChart.options.scales.yHours.grid.color = gridColor;
          historyChart.options.plugins.legend.labels.color = textColor;
+         historyChart.options.plugins.tooltip.backgroundColor = isDark ? 'rgba(40,40,40,0.9)' : 'rgba(255,255,255,0.9)';
+         historyChart.options.plugins.tooltip.titleColor = textColor;
+         historyChart.options.plugins.tooltip.bodyColor = textColor;
+         historyChart.options.plugins.tooltip.borderColor = gridColor;
+
 
          // Update dataset colors
-          historyChart.data.datasets[0].backgroundColor = barBgColor; // Bar fill
-          historyChart.data.datasets[0].borderColor = barBorderColor; // Bar border
-          historyChart.data.datasets[1].borderColor = goalLineColor; // Goal line
-
-         // Tooltip styles might need adjustment if using custom HTML tooltips, but defaults usually adapt well
+         historyChart.data.datasets[0].backgroundColor = barBgColor;
+         historyChart.data.datasets[0].borderColor = barBorderColor;
+         historyChart.data.datasets[1].borderColor = goalLineColor;
      }
 
 
@@ -415,7 +448,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function saveState() {
         try {
-            localStorage.setItem('fastingTrackerStateEnhanced', JSON.stringify({
+            localStorage.setItem('fastingTrackerStateEnhanced_v1', JSON.stringify({ // Added version suffix
                 currentFastStartTime: currentFastStartTime,
                 fastHistory: fastHistory,
                 currentGoalDuration: currentGoalDuration,
@@ -424,26 +457,28 @@ document.addEventListener('DOMContentLoaded', () => {
              console.log("State saved.");
         } catch (error) {
             console.error("Error saving state to localStorage:", error);
-            // alert("Could not save your data. LocalStorage might be full or disabled.");
+            // Consider adding user feedback here if critical
         }
     }
 
     function loadState() {
         try {
-            const savedState = localStorage.getItem('fastingTrackerStateEnhanced');
+            const savedState = localStorage.getItem('fastingTrackerStateEnhanced_v1'); // Use version suffix
             if (savedState) {
                  console.log("Loading saved state...");
                 const state = JSON.parse(savedState);
-                // Load Theme FIRST so UI elements have correct initial style for calculations/chart
+
                 currentTheme = state.currentTheme || 'light';
-                applyTheme(currentTheme); // Apply theme immediately
+                // Apply theme *before* other UI updates that might depend on it
+                applyTheme(currentTheme);
 
                 currentFastStartTime = state.currentFastStartTime || null;
                 fastHistory = state.fastHistory || [];
+                 // Basic validation/migration if needed for history structure changes
+                 fastHistory = fastHistory.filter(item => item && typeof item.startTime === 'number' && typeof item.duration === 'number');
+
                 currentGoalDuration = state.currentGoalDuration || null;
 
-
-                // If the page was closed while fasting, restart the timer
                 if (currentFastStartTime) {
                      console.log("Resuming active fast timer.");
                     startTimer();
@@ -451,18 +486,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.log("State loaded successfully.");
             } else {
                  console.log("No saved state found, using defaults.");
-                 // Apply default theme if no state saved
-                 applyTheme(currentTheme); // Should be 'light' by default
+                 applyTheme(currentTheme); // Apply default theme
             }
         } catch (error) {
             console.error("Error loading state from localStorage:", error);
-            // Reset state on error to prevent partial loading issues
+            localStorage.removeItem('fastingTrackerStateEnhanced_v1'); // Clear potentially corrupted state
+            // Reset to defaults
             currentFastStartTime = null;
             fastHistory = [];
             currentGoalDuration = null;
-            currentTheme = 'light'; // Reset theme to default
-            applyTheme(currentTheme); // Apply default theme
-            // alert("Could not load previous data. Starting fresh.");
+            currentTheme = 'light';
+            applyTheme(currentTheme);
+            // alert("Could not load previous data. Starting fresh."); // User feedback
         }
     }
 
@@ -479,26 +514,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function formatDateTime(date) {
         // e.g., "Oct 26, 10:30 AM"
+         if (!(date instanceof Date) || isNaN(date)) {
+            return "Invalid Date"; // Handle invalid date input
+        }
         const options = {
             month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true
         };
         try {
-            return date.toLocaleString(undefined, options); // Use browser's locale
+            return date.toLocaleString(undefined, options);
         } catch (e) {
             console.error("Error formatting date:", e);
-            return date.toISOString(); // Fallback
+            // Fallback to a more basic format if locale fails
+            return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
         }
     }
      function formatDateForChart(date) {
-        // e.g., "10/26" (Month/Day) - Keep labels concise
+         if (!(date instanceof Date) || isNaN(date)) {
+            return "?"; // Handle invalid date input
+        }
+        // e.g., "10/26"
          const options = { month: 'numeric', day: 'numeric' };
           try {
-            return date.toLocaleDateString(undefined, options); // Use browser's locale
+            return date.toLocaleDateString(undefined, options);
         } catch (e) {
              console.error("Error formatting date for chart:", e);
              return date.toISOString().substring(5, 10); // Fallback M-D
         }
-
      }
 
 }); // End DOMContentLoaded

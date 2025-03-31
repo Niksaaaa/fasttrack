@@ -7,19 +7,20 @@
     <link rel="stylesheet" href="style.css">
 
     <!-- PWA Meta Tags -->
-    <meta name="theme-color" content="#4CAF50"/> <!-- Match your primary color -->
+    <meta name="theme-color" content="#4CAF50"/> <!-- Updated by JS -->
     <link rel="manifest" href="manifest.json">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="FastTrack+">
-    <link rel="apple-touch-icon" href="icons/icon-192x192.png"> <!-- Make sure you have an icon -->
+    <link rel="apple-touch-icon" href="icons/icon-192x192.png"> <!-- Ensure path is correct -->
 
 </head>
 <body data-theme="light"> <!-- Theme attribute -->
     <div class="container">
 
         <header class="app-header">
+            <!-- The custom install button has been REMOVED from here -->
             <h1>Fasting Tracker+</h1>
             <div class="theme-switcher">
                 <label for="themeToggle" class="sr-only">Toggle Theme</label>
@@ -36,7 +37,7 @@
                 <input type="number" id="goal-hours" min="1" placeholder="e.g., 16">
                 <button id="set-goal-btn" class="btn btn-small">Set Goal</button>
             </div>
-            <p id="current-goal-display"></p>
+            <p id="current-goal-display">No goal set.</p>
         </div>
 
         <div id="status-card" class="card">
@@ -67,7 +68,7 @@
 
         <!-- Chart Section -->
         <div id="chart-section" class="card" style="display: none;">
-            <h2>History Overview</h2>
+            <h2>History Overview (Last 15 Fasts)</h2>
             <canvas id="historyChart"></canvas>
         </div>
 
@@ -75,6 +76,7 @@
             <h2>Fasting History</h2>
             <ul id="history-list">
                 <li id="no-history" style="display: none;">No completed fasts yet.</li>
+                <!-- History items will be added here by JS -->
             </ul>
         </div>
     </div>
